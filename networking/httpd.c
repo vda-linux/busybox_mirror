@@ -1484,7 +1484,7 @@ static NOINLINE void cgi_io_loop_and_exit(int fromCgi_rd, int toCgi_wr)
 				 * let CGI see EOF on CGI's stdin */
 				if (!ENABLE_FEATURE_HTTPD_PROXY || (toCgi_wr != fromCgi_rd)) {
 					close(toCgi_wr);
-					alarm(G.cgi_kill_timeout);
+					IF_FEATURE_HTTPD_CGI(alarm(G.cgi_kill_timeout);)
 				} else {
 					/* proxying a socket, there is no CGI */
 					alarm(0);
@@ -2605,7 +2605,7 @@ static void handle_incoming_and_exit(const len_and_sockaddr *fromAddr)
 					script_i = NULL;
 				}
 #endif
- exists:
+ IF_FEATURE_HTTPD_CGI(exists:)
 				file_size = sb.st_size;
 				last_mod = sb.st_mtime;
 			}
