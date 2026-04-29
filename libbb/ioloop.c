@@ -5,6 +5,7 @@
  * Licensed under GPLv2, see file LICENSE in this source tree.
  */
 //kbuild:lib-$(CONFIG_TELNETD) += ioloop.o
+//kbuild:lib-$(CONFIG_TELNET) += ioloop.o
 
 #include "libbb.h"
 
