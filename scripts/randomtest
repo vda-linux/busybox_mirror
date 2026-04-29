@@ -36,6 +36,7 @@ cat .config \
 | grep -v CONFIG_SELINUX \
 | grep -v CONFIG_EFENCE \
 | grep -v CONFIG_DMALLOC \
+| grep -v CONFIG_FEATURE_TELNETD_SELFTEST_DEBUG \
 \
 | grep -v CONFIG_RFKILL \
 >.config.new
@@ -46,6 +47,7 @@ echo "CONFIG_CROSS_COMPILER_PREFIX=\"${CROSS_COMPILER_PREFIX}\"" >>.config
 echo '# CONFIG_SELINUX is not set' >>.config
 echo '# CONFIG_EFENCE is not set' >>.config
 echo '# CONFIG_DMALLOC is not set' >>.config
+echo '# CONFIG_FEATURE_TELNETD_SELFTEST_DEBUG is not set' >>.config
 echo '# CONFIG_RFKILL is not set' >>.config
 
 # If glibc, don't build static
@@ -80,6 +82,7 @@ if test x"$LIBC" = x"uclibc"; then
 	| grep -v CONFIG_STATIC \
 	| grep -v CONFIG_BUILD_LIBBUSYBOX \
 	| grep -v CONFIG_PIE \
+	| grep -v CONFIG_FEATURE_TELNETD_SELFTEST_DEBUG \
 	\
 	| grep -v CONFIG_FEATURE_2_4_MODULES \
 	| grep -v CONFIG_FEATURE_SYNC_FANCY \
@@ -97,6 +100,7 @@ if test x"$LIBC" = x"uclibc"; then
 	echo 'CONFIG_STATIC=y' >>.config
 	echo '# CONFIG_BUILD_LIBBUSYBOX is not set' >>.config
 	echo '# CONFIG_PIE is not set' >>.config
+	echo '# CONFIG_FEATURE_TELNETD_SELFTEST_DEBUG is not set' >>.config
 	echo '# CONFIG_FEATURE_2_4_MODULES is not set' >>.config
 	echo '# CONFIG_FEATURE_SYNC_FANCY is not set' >>.config
 	# My uclibc installation does not support some needed APIs...
@@ -116,6 +120,7 @@ if test x"$LIBC" = x"musl"; then
 	cat .config \
 	| grep -v CONFIG_STATIC \
 	| grep -v CONFIG_DEBUG_SANITIZE \
+	| grep -v CONFIG_FEATURE_TELNETD_SELFTEST_DEBUG \
 	| grep -v CONFIG_LFS \
 	| grep -v CONFIG_EXTRA_COMPAT \
 	| grep -v CONFIG_FEATURE_2_4_MODULES \
@@ -127,6 +132,7 @@ if test x"$LIBC" = x"musl"; then
 	echo 'CONFIG_STATIC=y' >>.config
 	# "error: cannot specify -static with -fsanitize=address":
 	echo '# CONFIG_DEBUG_SANITIZE is not set' >>.config
+	echo '# CONFIG_FEATURE_TELNETD_SELFTEST_DEBUG is not set' >>.config
 	# with LFS off, uoff_t will have wrong width:
 	echo 'CONFIG_LFS=y' >>.config
 	echo '# CONFIG_EXTRA_COMPAT is not set' >>.config
