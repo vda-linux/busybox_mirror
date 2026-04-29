@@ -2558,7 +2558,7 @@ static void handle_incoming_and_exit(const len_and_sockaddr *fromAddr)
 
 #if ENABLE_FEATURE_HTTPD_CGI
 	if (is_prefixed_with(tptr, "cgi-bin/")) {
-		script_i = NULL; /* no interpreter */
+		IF_FEATURE_HTTPD_CONFIG_WITH_SCRIPT_INTERPR(script_i = NULL; /* no interpreter */)
 		cgi_type = CGI_NORMAL;
 		if (stat(tptr, &sb) == 0) {
 			/* disallow anything but ordinary files in cgi-bin/ */
