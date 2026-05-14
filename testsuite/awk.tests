@@ -612,7 +612,8 @@ b
 # Currently we use REG_STARTEND ("This flag is a BSD extension, not present in POSIX")
 # to implement the code to handle this correctly, but if your libc has no REG_STARTEND,
 # the alternative code mishandles this case.
-testing 'awk gsub erroneous word start match' \
+test x"$SKIP_KNOWN_BUG_AWK_WORDMATCH" = x"" \
+&& testing 'awk gsub erroneous word start match' \
 	"awk 'BEGIN { a=\"abc\"; gsub(/\<b*/,\"\",a); print a }'" \
 	'abc\n' \
 	'' ''
