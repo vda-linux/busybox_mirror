@@ -1390,9 +1390,12 @@ static void process_files(void)
 			}
 			/* Append next_line, read new next_line. */
 			len = strlen(pattern_space);
-			pattern_space = xrealloc(pattern_space, len + strlen(next_line) + 2);
-			pattern_space[len] = '\n';
-			strcpy(pattern_space + len+1, next_line);
+			{
+				size_t nlen = strlen(next_line);
+				pattern_space = xrealloc(pattern_space, len + nlen + 2);
+				pattern_space[len] = '\n';
+				memcpy(pattern_space + len + 1, next_line, nlen + 1);
+			}
 			last_gets_char = next_gets_char;
 			next_line = get_next_line(&next_gets_char, &last_puts_char);
 			linenum++;
@@ -1445,9 +1448,14 @@ static void process_files(void)
 					pattern_space_size + hold_space_size);
 			if (pattern_space_size == 2)
 				pattern_space[0] = 0;
-			strcat(pattern_space, "\n");
-			if (G.hold_space)
-				strcat(pattern_space, G.hold_space);
+			{
+				size_t pslen = strlen(pattern_space);
+				pattern_space[pslen] = '\n';
+				if (G.hold_space)
+					memcpy(pattern_space + pslen + 1, G.hold_space, hold_space_size + 1);
+				else
+					pattern_space[pslen + 1] = '\0';
+			}
 			last_gets_char = '\n';
 
 			break;
@@ -1470,9 +1478,14 @@ static void process_files(void)
 
 			if (hold_space_size == 2)
 				*G.hold_space = 0;
-			strcat(G.hold_space, "\n");
-			if (pattern_space)
-				strcat(G.hold_space, pattern_space);
+			{
+				size_t hslen = strlen(G.hold_space);
+				G.hold_space[hslen] = '\n';
+				if (pattern_space)
+					memcpy(G.hold_space + hslen + 1, pattern_space, strlen(pattern_space) + 1);
+				else
+					G.hold_space[hslen + 1] = '\0';
+			}
 
 			break;
 		}
