@@ -215,6 +215,21 @@ static char** new_env(void)
 	return &client6_data.env_ptr[client6_data.env_idx++];
 }
 
+/* A malicious DHCPv6 server fully controls these option strings. Bytes that
+ * cannot legitimately appear in a URL/FQDN/TZ token (whitespace + control
+ * chars) let it inject extra argv, shell words or file lines through the
+ * config-script environment. Refuse such values. (The IPv4 client sanitizes
+ * host options via good_hostname(); the IPv6 client never did.) */
+static int d6_optval_is_safe(const char *p, unsigned len)
+{
+	while (len--) {
+		unsigned char c = (unsigned char)*p++;
+		if (c < 0x20 || c == 0x7f || c == ' ')
+			return 0;
+	}
+	return 1;
+}
+
 static char *string_option_to_env(const uint8_t *option,
 		const uint8_t *option_end)
 {
@@ -239,6 +254,10 @@ static char *string_option_to_env(const uint8_t *option,
 	val_len = (option[2] << 8) | option[3];
 	if (val_len + &option[D6_OPT_DATA] > option_end) {
 		bb_simple_error_msg("option data exceeds option length");
+		return NULL;
+	}
+	if (!d6_optval_is_safe((char*)option + 4, val_len)) {
+		bb_error_msg("ignoring unsafe value for option %s", name);
 		return NULL;
 	}
 	return xasprintf("%s=%.*s", name, val_len, (char*)option + 4);
@@ -410,7 +429,8 @@ static void option_to_env(const uint8_t *option, const uint8_t *option_end)
 			 * broken server here if any of the reserved bits are set.
 			 */
 			if (option[4] & 0xf8) {
-				*new_env() = xasprintf("fqdn=%.*s", (int)option[3], (char*)option + 4);
+				if (d6_optval_is_safe((char*)option + 4, option[3]))
+					*new_env() = xasprintf("fqdn=%.*s", (int)option[3], (char*)option + 4);
 				break;
 			}
 			dlist = dname_dec(option + 5, (/*(option[2] << 8) |*/ option[3]) - 1, "fqdn=");
@@ -423,10 +443,12 @@ static void option_to_env(const uint8_t *option, const uint8_t *option_end)
 #if ENABLE_FEATURE_UDHCPC6_RFC4833
 		/* RFC 4833 Timezones */
 		case D6_OPT_TZ_POSIX:
-			*new_env() = xasprintf("tz=%.*s", (int)option[3], (char*)option + 4);
+			if (d6_optval_is_safe((char*)option + 4, option[3]))
+				*new_env() = xasprintf("tz=%.*s", (int)option[3], (char*)option + 4);
 			break;
 		case D6_OPT_TZ_NAME:
-			*new_env() = xasprintf("tz_name=%.*s", (int)option[3], (char*)option + 4);
+			if (d6_optval_is_safe((char*)option + 4, option[3]))
+				*new_env() = xasprintf("tz_name=%.*s", (int)option[3], (char*)option + 4);
 			break;
 #endif
 		case D6_OPT_BOOT_URL:
