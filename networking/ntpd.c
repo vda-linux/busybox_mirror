@@ -480,9 +480,23 @@ struct globals {
 
 static double LOG2D(int a)
 {
+	double d = 1.0;
+
+	/*
+	 * The precision exponent comes from the network and is an int8_t.
+	 * Keep shifts below the width of unsigned long on 32-bit targets.
+	 */
+	while (a > 30) {
+		d *= (1UL << 30);
+		a -= 30;
+	}
+	while (a < -30) {
+		d /= (1UL << 30);
+		a += 30;
+	}
 	if (a < 0)
-		return 1.0 / (1UL << -a);
-	return 1UL << a;
+		return d / (1UL << -a);
+	return d * (1UL << a);
 }
 static ALWAYS_INLINE double SQUARE(double x)
 {
