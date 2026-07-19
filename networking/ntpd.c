@@ -480,9 +480,23 @@ struct globals {
 
 static double LOG2D(int a)
 {
+	double d = 1.0;
+
+	/*
+	 * The precision exponent comes from the network and is an int8_t.
+	 * Keep shifts below the width of unsigned long on 32-bit targets.
+	 */
+	while (a > 30) {
+		d *= (1UL << 30);
+		a -= 30;
+	}
+	while (a < -30) {
+		d /= (1UL << 30);
+		a += 30;
+	}
 	if (a < 0)
-		return 1.0 / (1UL << -a);
-	return 1UL << a;
+		return d / (1UL << -a);
+	return d * (1UL << a);
 }
 static ALWAYS_INLINE double SQUARE(double x)
 {
@@ -583,8 +597,10 @@ d_to_lfp(l_fixedpt_t *lfp, double d)
 {
 	uint32_t intl;
 	uint32_t frac;
-	intl = (uint32_t)(time_t)d;
-	frac = (uint32_t)((d - (time_t)d) * 0xffffffff);
+	if (d >= (double)(1ULL << 32))
+		d -= (double)(1ULL << 32);
+	intl = (uint32_t)d;
+	frac = (uint32_t)((d - intl) * 0xffffffff);
 	lfp->int_partl = htonl(intl);
 	lfp->fractionl = htonl(frac);
 }
@@ -1027,7 +1043,7 @@ static void run_script(const char *action, double offset)
 	free(env4);
 }
 
-static NOINLINE void
+static NOINLINE int
 step_time(double offset)
 {
 	llist_t *item;
@@ -1046,8 +1062,22 @@ step_time(double offset)
 	 * a more complex code would be needed.
 	 */
 	dtime = tvc.tv_sec + (1.0e-6 * tvc.tv_usec) + offset;
+	/*
+	 * A peer can make offset large enough that dtime is not representable
+	 * by a 32-bit time_t.  Converting such a double to time_t is undefined.
+	 * ntpd does not support dates before the Unix epoch.
+	 */
+	if (dtime != dtime
+	 || dtime < 0.0
+	 || (sizeof(time_t) == 4
+	     && dtime >= (((time_t)-1 > (time_t)0)
+	                  ? 4294967296.0 : 2147483648.0))
+	) {
+		bb_error_msg("refusing invalid clock step: resulting time %.0f", dtime);
+		return 0;
+	}
 	tvn.tv_sec = (time_t)dtime;
-	tvn.tv_usec = (dtime - tvn.tv_sec) * 1000000;
+	tvn.tv_usec = (dtime - (double)tvn.tv_sec) * 1000000;
 	xsettimeofday(&tvn);
 
 	VERB2 {
@@ -1084,6 +1114,7 @@ step_time(double offset)
 			set_next(pp, RETRY_INTERVAL);
 		}
 	}
+	return 1;
 }
 
 static void clamp_pollexp_and_set_MAXSTRAT(void)
@@ -1525,7 +1556,8 @@ update_local_clock(peer_t *p)
 		 * intervals.
 		 */
 		VERB4 bb_error_msg("stepping time by %+f; poll_exp=MINPOLL", offset);
-		step_time(offset);
+		if (!step_time(offset))
+			return 0;
 		if (option_mask32 & OPT_q) {
 			/* We were only asked to set time once. Done. */
 			exit(0);
@@ -2086,6 +2118,8 @@ recv_and_process_client_pkt(void /*int fd*/)
 	l_fixedpt_t      query_xmttime;
 
 	to = get_sock_lsa(G_listen_fd);
+	if (!to)
+		bb_simple_perror_msg_and_die("getsockname");
 	from = xzalloc(to->len);
 
 	size = recv_from_to(G_listen_fd, &msg, sizeof(msg), MSG_DONTWAIT, from, &to->u.sa, to->len);
