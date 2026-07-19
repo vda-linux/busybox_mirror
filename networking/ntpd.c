@@ -1043,7 +1043,7 @@ static void run_script(const char *action, double offset)
 	free(env4);
 }
 
-static NOINLINE void
+static NOINLINE int
 step_time(double offset)
 {
 	llist_t *item;
@@ -1062,8 +1062,22 @@ step_time(double offset)
 	 * a more complex code would be needed.
 	 */
 	dtime = tvc.tv_sec + (1.0e-6 * tvc.tv_usec) + offset;
+	/*
+	 * A peer can make offset large enough that dtime is not representable
+	 * by a 32-bit time_t.  Converting such a double to time_t is undefined.
+	 * ntpd does not support dates before the Unix epoch.
+	 */
+	if (dtime != dtime
+	 || dtime < 0.0
+	 || (sizeof(time_t) == 4
+	     && dtime >= (((time_t)-1 > (time_t)0)
+	                  ? 4294967296.0 : 2147483648.0))
+	) {
+		bb_error_msg("refusing invalid clock step: resulting time %.0f", dtime);
+		return 0;
+	}
 	tvn.tv_sec = (time_t)dtime;
-	tvn.tv_usec = (dtime - tvn.tv_sec) * 1000000;
+	tvn.tv_usec = (dtime - (double)tvn.tv_sec) * 1000000;
 	xsettimeofday(&tvn);
 
 	VERB2 {
@@ -1100,6 +1114,7 @@ step_time(double offset)
 			set_next(pp, RETRY_INTERVAL);
 		}
 	}
+	return 1;
 }
 
 static void clamp_pollexp_and_set_MAXSTRAT(void)
@@ -1541,7 +1556,8 @@ update_local_clock(peer_t *p)
 		 * intervals.
 		 */
 		VERB4 bb_error_msg("stepping time by %+f; poll_exp=MINPOLL", offset);
-		step_time(offset);
+		if (!step_time(offset))
+			return 0;
 		if (option_mask32 & OPT_q) {
 			/* We were only asked to set time once. Done. */
 			exit(0);
