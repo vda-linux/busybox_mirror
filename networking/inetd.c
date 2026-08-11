@@ -1043,7 +1043,7 @@ static void reread_config_file(int sig UNUSED_PARAM)
 			portno = bb_strtou(sep->se_service, NULL, 10);
 #if ENABLE_FEATURE_INETD_RPC
 			if (is_rpc_service(sep)) {
-				sep->se_rpcprog = n;
+				sep->se_rpcprog = portno;
 				if (errno) { /* se_service is not numeric */
 					struct rpcent *rp = getrpcbyname(sep->se_service);
 					if (rp == NULL) {
