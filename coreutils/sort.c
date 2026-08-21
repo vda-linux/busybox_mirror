@@ -572,7 +572,9 @@ int sort_main(int argc UNUSED_PARAM, char **argv)
 #if ENABLE_FEATURE_SORT_OPTIMIZE_MEMORY
 			if (count_to_optimize_dups != 0)
 				count_to_optimize_dups--;
-			if (count_to_optimize_dups == 0) {
+			/* -u may free lines, so cannot point a line to the middle of
+			 * another one in that case	*/
+			if (count_to_optimize_dups == 0 && !(option_mask32 & FLAG_u)) {
 				size_t len;
 				char *new_line;
 
