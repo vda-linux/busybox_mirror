@@ -1546,7 +1546,10 @@ IF_DESKTOP(	"no-parent\0"        No_argument       "\xf0")
 	G.user_agent = "Wget"; /* "User-Agent" header field */
 
 	GETOPT32(argv, "^"
-		"cqSO:o:P:Y:U:T:+"
+		"cqSO:o:P:Y:U:"
+		IF_FEATURE_WGET_TIMEOUT("T:+")
+		/* Keep the option bit stable; accept and ignore -T if disabled. */
+		IF_NOT_FEATURE_WGET_TIMEOUT("T:")
 		/*ignored:*/ "t:"
 		/*ignored:*/ "n::"
 		/* wget has exactly four -n<letter> opts, all of which we can ignore:
