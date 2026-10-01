@@ -755,11 +755,14 @@ static int spawn_https_helper_openssl(const char *host, unsigned port)
 
 		BB_EXECVP(argv[0], argv);
 		xmove_fd(3, 2);
+		/* vfork child: must not call exit(), it shares the parent's
+		 * address space (atexit handlers, stdio, musl's exit lock) */
 # if ENABLE_FEATURE_WGET_HTTPS
 		child_failed = 1;
-		xfunc_die();
+		_exit(xfunc_error_retval);
 # else
-		bb_perror_msg_and_die("can't execute '%s'", argv[0]);
+		bb_perror_msg("can't execute '%s'", argv[0]);
+		_exit(xfunc_error_retval);
 # endif
 		/* notreached */
 	}
