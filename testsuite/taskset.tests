@@ -5,12 +5,18 @@
 . ./testing.sh
 a="taskset"
 
+# CPU 0 may be outside the container's allowed CPU set.
+cpu=$(sed -n 's/^Cpus_allowed_list:[[:space:]]*\([0-9][0-9]*\).*/\1/p' /proc/self/status)
+test -n "$cpu" || { echo "Cannot read allowed CPUs from /proc/self/status" >&2; exit 1; }
+# Build one hex digit and trailing zeros without shifting by the CPU number.
+mask=$(printf '%x%*s' "$((1 << (cpu % 4)))" "$((cpu / 4))" '' | tr ' ' 0)
+
 # testing "test name"              "opts" "expected result" "file inp" "stdin"
 testing "taskset (get from pid 1)" "$a -p 1 >/dev/null;echo \$?" "0\n" "" ""
 testing "taskset (invalid pid)"    "$a -p 0 >/dev/null 2>&1;echo \$?" "1\n" "" ""
-testing "taskset (set_aff, needs CAP_SYS_NICE)" \
-	"$a 0x1 $SHELL -c '$a -p \$\$ | grep \"current affinity mask: 1\" >/dev/null'; echo \$?" \
+testing "taskset (set_aff)" \
+	"$a 0x$mask $SHELL -c '$a -p \$\$ | grep \"current affinity mask: $mask\$\" >/dev/null'; echo \$?" \ 
 	"0\n" "" ""
 
-unset a
+unset a cpu mask
 exit $FAILCOUNT
