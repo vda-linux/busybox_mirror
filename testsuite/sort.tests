@@ -17,6 +17,14 @@ testing "sort reverse" "sort -r input" "wook\nwalrus\npoint\npabst\naargh\n" \
 
 # These tests require the full option set.
 
+optional FEATURE_SORT_OPTIMIZE_MEMORY
+data=$(printf '\n%.0s' {1..16384}; printf 'long line\nline\nline\n')
+testing "sort big file" "sort -u input" \
+"
+line
+long line
+" "$data" ""
+
 optional FEATURE_SORT_BIG
 # Longish chunk of data re-used by the next few tests
 
