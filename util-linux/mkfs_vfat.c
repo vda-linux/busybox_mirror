@@ -41,6 +41,12 @@
 #define BLOCK_SIZE_BITS 10
 #define BLOCK_SIZE      (1<<BLOCK_SIZE_BITS)
 
+#if 0
+# define dbg(...) bb_error_msg(__VA_ARGS__)
+#else
+# define dbg(...) ((void)0)
+#endif
+
 // M$ says the high 4 bits of FAT32 FAT entries are reserved
 #define EOF_FAT32       0x0FFFFFF8
 #define BAD_FAT32       0x0FFFFFF7
@@ -343,6 +349,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 			/*minsize:*/ 6 * bytes_per_sect | /*extend:*/ 1
 		);
 	volume_size_sect = volume_size_bytes / bytes_per_sect;
+	dbg("volume_size_sect:%llu", (unsigned long long)volume_size_sect);
 
 	//
 	// Find out or guess media parameters
@@ -366,19 +373,18 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 			heads = geometry.heads;
 
  set_cluster_size:
-			/* For FAT32, try to do the same as M$'s format command
-			 * (see http://www.win.tue.nl/~aeb/linux/fs/fat/fatgen103.pdf p. 20):
-			 * fs size <= 260M: 0.5k clusters
-			 * fs size <=   8G: 4k clusters
-			 * fs size <=  16G: 8k clusters
-			 * fs size >   16G: 16k clusters
-			 */
+			// For FAT32, try to do the same as M$'s format command
+			// (see http://www.win.tue.nl/~aeb/linux/fs/fat/fatgen103.pdf p. 20):
+			// fs size <= 260M: 0.5k clusters
+			// fs size <=   8G: 4k clusters
+			// fs size <=  16G: 8k clusters
+			// fs size >   16G: 16k clusters
 			sect_per_clust = 1;
 			if (volume_size_bytes >= 260*1024*1024) {
 				sect_per_clust = 8;
-				/* fight gcc: */
-				/* "error: integer overflow in expression" */
-				/* "error: right shift count >= width of type" */
+				// fight gcc:
+				// "error: integer overflow in expression"
+				// "error: right shift count >= width of type"
 				if (sizeof(off_t) > 4) {
 					unsigned t = (volume_size_bytes >> 31 >> 1);
 					if (t >= 8/4)
@@ -391,6 +397,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 // 32 sectors/cluster stops being enough only at about twice as many sectors,
 // which is currently not allowed anyway (total sector count must fit into a 32 bit header field).
 				}
+				dbg("sect_per_clust:%d", sect_per_clust);
 			}
 		} else {
 			// floppy, loop, or regular file
@@ -435,7 +442,10 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 		// Match upstream message and adjust.
 		// Upstream does not try to automatically increase sector size,
 		// requires explicit -S SECTSIZE.
-		bb_error_msg("target too large, space at end will be left unused");
+		// Example: mkfs.vfat -F32 -C FILE2TB $((1024*1024*1024*2))
+		// should say that one sector is unused:
+		bb_error_msg("target too large, unused sectors:%llu",
+			(unsigned long long)(volume_size_sect - 0xFFFFFFFFu));
 		volume_size_sect = 0xFFFFFFFFu;
 	}
 
@@ -443,7 +453,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 	// 1 boot, 1 fsinfo, 2 FAT sectors, 2 data sectors
 	// and Linux was tested to successfully mount it.
 	if ((off_t)(volume_size_sect - reserved_sct) < 4)
-		/* common message */
+		// common message
 		bb_error_msg_and_die("image is too small: %lld bytes",
 			(unsigned long long)volume_size_sect * bytes_per_sect);
 
@@ -454,6 +464,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 	// (an initial guess for sect_per_clust should already be set)
 	sect_per_fat = 1;
 	while (1) {
+		dbg("sect_per_clust:%d", sect_per_clust);
 		while (1) {
 			int spf_adj;
 			total_clust = (volume_size_sect - reserved_sct - NUM_FATS * sect_per_fat) / sect_per_clust;
@@ -474,6 +485,8 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 #if 0
 			bb_error_msg("sect_per_clust:%u sect_per_fat:%u total_clust:%u 0x%08x",
 					sect_per_clust, sect_per_fat, (unsigned)total_clust, (unsigned)total_clust);
+			if (total_clust > 0x1fffffff)
+				goto next;
 			bb_error_msg("adjust to sect_per_fat:%d", spf_adj);
 #endif
 			if (spf_adj <= 0) {
@@ -591,6 +604,9 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 		MARK_CLUSTER(2, EOF_FAT32);
 		for (i = 0; i < NUM_FATS; i++) {
 			xwrite(dev, buf, bytes_per_sect);
+//TODO: this is slow on very large images (FAT tables can be up to 1 GByte).
+//Can try fallocate(FALLOC_FL_PUNCH_HOLE), then try fallocate(FALLOC_FL_ZERO_RANGE).
+//Can have larger write buffer.
 			for (j = 1; j < sect_per_fat; j++)
 				xwrite(dev, buf + bytes_per_sect, bytes_per_sect);
 		}
