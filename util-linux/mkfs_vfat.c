@@ -396,6 +396,11 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 						sect_per_clust = 16;
 					if (t >= 16/4)
 						sect_per_clust = 32;
+// with 2^32 (0x100000000) sectors and 32 sectors/cluster, there are 0x08000000 clusters
+// (which fits into maximum allowed FAT32 sector number, 0x0FFFFFF7)
+// and each FAT table is 512 MBytes.
+// 32 sectors/cluster stops being enough only at about twice as many sectors,
+// which is currently not allowed anyway (total sector count must fit into a 32 bit header field).
 				}
 			}
 		} else {
