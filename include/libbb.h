@@ -681,6 +681,8 @@ void bb_unsetenv_and_free(char *key) FAST_FUNC;
 void xunlink(const char *pathname) FAST_FUNC;
 void xstat(const char *pathname, struct stat *buf) FAST_FUNC;
 void xfstat(int fd, struct stat *buf, const char *errmsg) FAST_FUNC;
+mode_t FAST_FUNC xfstat_mode(int fd, const char *file_name);
+off_t FAST_FUNC xfstat_size(int fd, const char *file_name);
 int open3_or_warn(const char *pathname, int flags, int mode) FAST_FUNC;
 int open_or_warn(const char *pathname, int flags) FAST_FUNC;
 int xopen3(const char *pathname, int flags, int mode) FAST_FUNC;

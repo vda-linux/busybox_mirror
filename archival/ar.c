@@ -151,15 +151,15 @@ static int write_ar_header(archive_handle_t *handle)
 
 static int write_ar_archive(archive_handle_t *handle)
 {
-	struct stat st;
+	off_t st_size;
 	archive_handle_t *out_handle;
 
-	xfstat(handle->src_fd, &st, handle->ar__name);
+	st_size = xfstat_size(handle->src_fd, handle->ar__name);
 
 	/* if archive exists, create a new handle for output.
 	 * we create it in place of the old one.
 	 */
-	if (st.st_size != 0) {
+	if (st_size != 0) {
 		out_handle = init_handle();
 		xunlink(handle->ar__name);
 		out_handle->src_fd = xopen(handle->ar__name, O_WRONLY | O_CREAT | O_TRUNC);
@@ -174,7 +174,7 @@ static int write_ar_archive(archive_handle_t *handle)
 	out_handle->offset += AR_MAGIC_LEN + 1;
 
 	/* skip to the end of the archive if we have to append stuff */
-	if (st.st_size != 0) {
+	if (st_size != 0) {
 		handle->filter = filter_replaceable;
 		handle->action_data = copy_data;
 		unpack_ar_archive(handle);

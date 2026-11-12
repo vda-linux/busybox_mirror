@@ -200,14 +200,6 @@ static const char boot_code[] ALIGN1 =
 	/* 077: message_txt: */
 	"This is not a bootable disk\r\n";
 
-// In order to reduce stack usage in main (-440 bytes on x86)
-static NOINLINE mode_t xfstat_mode(int fd, const char *file_name)
-{
-	struct stat st;
-	xfstat(fd, &st, file_name);
-	return st.st_mode;
-}
-
 /* compat:
  * mkdosfs 2.11 (12 Mar 2005)
  * Usage: mkdosfs [-A] [-c] [-C] [-v] [-I] [-l bad-block-file]
