@@ -200,9 +200,13 @@ static const char boot_code[] ALIGN1 =
 	/* 077: message_txt: */
 	"This is not a bootable disk\r\n";
 
-
-#define MARK_CLUSTER(cluster, value) \
-	((uint32_t *)fat)[cluster] = SWAP_LE32(value)
+// In order to reduce stack usage in main (-440 bytes on x86)
+static NOINLINE mode_t xfstat_mode(int fd, const char *file_name)
+{
+	struct stat st;
+	xfstat(fd, &st, file_name);
+	return st.st_mode;
+}
 
 /* compat:
  * mkdosfs 2.11 (12 Mar 2005)
@@ -238,11 +242,10 @@ static const char boot_code[] ALIGN1 =
 int mkfs_vfat_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
 int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 {
-	struct stat st;
+	mode_t st_mode;
 	const char *arg_volume_label = bb_NO_NAME_11; //default
 	char volume_label11[12];
 	char *buf;
-	char *device_name;
 	uoff_t volume_size_bytes;
 	uoff_t volume_size_sect;
 	uint32_t total_clust;
@@ -297,23 +300,21 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 	// mkfs.fat 4.2 allows "-b N -R N+1" (meaning: backup of only bootsect,
 	// but no backup of fsinfo). We do not allow this (not very useful, adds code).
 
-	// cache device name
-	device_name = argv[0];
 	// default volume ID: somewhat random (not crypto-strong)
 	// (mix in pid to avoid same IDs when run in rapid succession)
 	volume_id = time(NULL) ^ getpid();
 	// truncate to exactly 11 chars, pad with spaces
 	sprintf(volume_label11, "%-11.11s", arg_volume_label);
 
-	dev = xopen(device_name, (opts & OPT_C) ? (O_CREAT|O_EXCL|O_RDWR) : O_RDWR);
-	xfstat(dev, &st, device_name);
+	dev = xopen(argv[0], (opts & OPT_C) ? (O_CREAT|O_EXCL|O_RDWR) : O_RDWR);
+	st_mode = xfstat_mode(dev, argv[0]);
 
 	//
 	// Get image size and sector size
 	//
 	bytes_per_sect = SECTOR_SIZE;
-	if (!S_ISBLK(st.st_mode)) {
-		if (!S_ISREG(st.st_mode)) {
+	if (!S_ISBLK(st_mode)) {
+		if (!S_ISREG(st_mode)) {
 			if (!argv[1])
 				bb_simple_error_msg_and_die("image size must be specified");
 		}
@@ -334,7 +335,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 		)
 			bb_error_msg_and_die("will not try to make filesystem on full-disk device (use -I if wanted)");
 		// can't work on mounted filesystems
-		if (find_mount_point(device_name, 0))
+		if (find_mount_point(argv[0], 0))
 			bb_error_msg_and_die("can't format mounted filesystem");
 #endif
 		// get true sector size
@@ -520,7 +521,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 			"total sectors:%u, clusters:%u, sectors/cluster:%u\n"
 			"FATs:2, sectors/FAT:%u\n"
 			"volumeID:%08x, label:'%s'\n",
-			device_name,
+			argv[0],
 			heads, sect_per_track, bytes_per_sect,
 			(unsigned)media_byte,
 			(unsigned)volume_size_sect, (unsigned)total_clust, (unsigned)sect_per_clust,
@@ -594,10 +595,10 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 
 	{ // file allocation tables
 		unsigned i,j;
-		unsigned char *fat = (void*)buf;
 
 		memset(buf, 0, bytes_per_sect * 2);
 		// initial FAT entries
+#define MARK_CLUSTER(cluster, value) ((uint32_t *)buf)[cluster] = SWAP_LE32(value)
 		MARK_CLUSTER(0, 0x0fffff00 | media_byte);
 		MARK_CLUSTER(1, 0x0fffffff);
 		// mark cluster 2 as EOF (used for root dir)

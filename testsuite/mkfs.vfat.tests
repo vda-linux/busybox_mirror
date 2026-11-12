@@ -14,21 +14,21 @@ optional BLKID
 # is _solely_ determined by cluster count).
 # But Linux kernel happily mounts these small FAT32 images.
 testing "mkfs.vfat 32MB image" \
-	"dd if=/dev/zero of=input bs=512 count=65536 2>/dev/null; mkfs.vfat input && blkid input | sed 's/\"....-....\"/\"xxxx-xxxx\"/' " \
+	"dd if=/dev/zero of=input bs=512 count=65536 2>/dev/null; mkfs.vfat input 2>&1 && blkid input | sed 's/\"....-....\"/\"xxxx-xxxx\"/' " \
 'input: UUID="xxxx-xxxx" TYPE="vfat"
 ' \
 	"" ""
 
 # The minimal image with default -b6 -R32 (has just 2 FAT sectors and 2 data sectors)
 testing "mkfs.vfat 18KB image" \
-	"mkfs.vfat input 18 && blkid input | sed 's/\"....-....\"/\"xxxx-xxxx\"/' " \
+	"mkfs.vfat input 18 2>&1 && blkid input | sed 's/\"....-....\"/\"xxxx-xxxx\"/' " \
 'input: UUID="xxxx-xxxx" TYPE="vfat"
 ' \
 	"" ""
 
 # The minimal image which can still be mounted and can have non-zero-length files
 testing "mkfs.vfat -b0 -R2 3KB image" \
-	"mkfs.vfat -b0 -R2 input 3 && blkid input | sed 's/\"....-....\"/\"xxxx-xxxx\"/' " \
+	"mkfs.vfat -b0 -R2 input 3 2>&1 && blkid input | sed 's/\"....-....\"/\"xxxx-xxxx\"/' " \
 'input: UUID="xxxx-xxxx" TYPE="vfat"
 ' \
 	"" ""
