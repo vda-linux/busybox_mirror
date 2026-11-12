@@ -93,10 +93,6 @@
 enum {
 // Perhaps this should remain constant
 	info_sector_number = 1,
-// TODO: make these cmdline options
-// dont forget sanity check: backup_boot_sector + 3 <= reserved_sect
-	backup_boot_sector = 3,
-	reserved_sect      = 6,
 };
 
 // how many blocks we try to read while testing
@@ -236,9 +232,13 @@ static const char boot_code[] ALIGN1 =
 //usage:       "Make FAT32 filesystem\n"
 /* //usage:  "\n	-c	Check BLOCKDEV for bad blocks" */
 //usage:     "\n	-C	Create new FILE"
-//usage:     "\n	-v	Verbose"
+//usage:     "\n	-b BACKUP_SECT"
+//usage:     "\n	-R FAT_START	FAT start sector"
+// ^^^ even though in FAT lingo it's "reserved sectors", in ordinary language
+// it's the sector where FAT table starts.
 /* //usage:  "\n	-I	Allow to use entire disk device (e.g. /dev/hda)" */
 //usage:     "\n	-n LBL	Volume label"
+//usage:     "\n	-v	Verbose"
 
 int mkfs_vfat_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
 int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
@@ -255,6 +255,8 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 	int dev;
 	unsigned bytes_per_sect;
 	unsigned sect_per_fat;
+	unsigned backup_boot_sct = 6; // match default of mkfs.fat 4.2
+	unsigned reserved_sct = 32;   // match default of mkfs.fat 4.2
 	unsigned opts;
 	uint16_t sect_per_track;
 	uint8_t media_byte;
@@ -285,12 +287,20 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 	};
 
 	opts = getopt32(argv, "^"
-		"b:cCf:F:h:Ii:l:m:n:r:R:s:S:v"
+		"b:+cCf:F:h:Ii:l:m:n:r:R:+s:S:v"
 		"\0" "-1", //:b+:f+:F+:h+:r+:R+:s+:S+:vv:c--l:l--c
-		/*b*/NULL, /*f*/NULL, /*F*/NULL, /*h*/NULL, /*i*/NULL,
+		/*b*/&backup_boot_sct, /*f*/NULL, /*F*/NULL, /*h*/NULL, /*i*/NULL,
 		/*l*/NULL, /*m*/NULL, /*n*/&arg_volume_label,
-		/*r*/NULL, /*R*/NULL, /*s*/NULL, /*S*/NULL);
+		/*r*/NULL, /*R*/&reserved_sct, /*s*/NULL, /*S*/NULL);
 	argv += optind;
+
+	if (reserved_sct < 2 || reserved_sct > 0xffff /* won't fit in header field */)
+		bb_error_msg_and_die("-R %u is invalid", reserved_sct);
+	if (backup_boot_sct >= reserved_sct - 1)
+		bb_error_msg_and_die("-b %u is too large", backup_boot_sct);
+	// We allow -b1 (will write the value to header) but treat it as 0.
+	// mkfs.fat 4.2 allows "-b N -R N+1" (meaning: backup of only bootsect,
+	// but no backup of fsinfo). We do not allow this (not very useful, adds code).
 
 	// cache device name
 	device_name = argv[0];
@@ -435,15 +445,10 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 		volume_size_sect = 0xFFFFFFFFu;
 	}
 
-	// Calculate number of clusters, sectors/cluster, sectors/FAT
-	// (an initial guess for sect_per_clust should already be set)
-	//
-	// "mkdosfs -v -F 32 image5k 5" is the minimum for now:
-	// 2 sectors for FATs and 2 data sectors
-	// and Linux can successfully mount it.
-//TODO: would 3 kbyte image mount? 1 boot, 1 fsinfo, 1*2 FAT, 1*2 data area
-//needs support for -b0 -R2
-	if ((off_t)(volume_size_sect - reserved_sect) < 4)
+	// "mkdosfs -b0 -R2 -v -F32 -C image3k 3" is the minimum for now:
+	// 1 boot, 1 fsinfo, 2 FAT sectors, 2 data sectors
+	// and Linux was tested to successfully mount it.
+	if ((off_t)(volume_size_sect - reserved_sct) < 4)
 		/* common message */
 		bb_error_msg_and_die("image is too small: %lld bytes",
 			(unsigned long long)volume_size_sect * bytes_per_sect);
@@ -451,11 +456,13 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 // From now on we know it fits 32 bits
 #define volume_size_sect ((uint32_t)volume_size_sect)
 
+	// Calculate number of clusters, sectors/cluster, sectors/FAT
+	// (an initial guess for sect_per_clust should already be set)
 	sect_per_fat = 1;
 	while (1) {
 		while (1) {
 			int spf_adj;
-			total_clust = (volume_size_sect - reserved_sect - NUM_FATS * sect_per_fat) / sect_per_clust;
+			total_clust = (volume_size_sect - reserved_sct - NUM_FATS * sect_per_fat) / sect_per_clust;
 			// total_clust may be > MAX_CLUST_CNT32 here, but it may be
 			// because sect_per_fat is underestimated,
 			// and with increased sect_per_fat it still may become
@@ -519,10 +526,8 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 	// Write filesystem image sequentially (no seeking)
 	//
 	{
+		unsigned bufsize = reserved_sct;
 		// (a | b) is poor man's max(a, b)
-		unsigned bufsize = reserved_sect;
-		//bufsize |= sect_per_fat; // can be quite large
-		bufsize |= 2; // use this instead
 		bufsize |= sect_per_clust;
 		buf = xzalloc(bufsize * bytes_per_sect);
 	}
@@ -535,15 +540,15 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 		STORE_LE(boot_blk->bytes_per_sect, bytes_per_sect);
 		STORE_LE(boot_blk->sect_per_clust, sect_per_clust);
 		// cast is needed on big endian to suppress a warning
-		STORE_LE(boot_blk->reserved_sect, (uint16_t)reserved_sect);
+		STORE_LE(boot_blk->reserved_sect, (uint16_t)reserved_sct);
 		STORE_LE(boot_blk->fats, 2);
 		//STORE_LE(boot_blk->dir_entries, 0); // for FAT32, stays 0
-		//STORE_LE(boot_blk->volume_size_sct16, 0); // for FAT32, stays 0 (Misrosoft says 0 must be here for FAT32, Linux does not care)
+		//STORE_LE(boot_blk->volume_size_sct16, 0); // for FAT32, stays 0 (Microsoft says must be 0 for FAT32, Linux does not care)
 		STORE_LE(boot_blk->media_byte, media_byte);
 		// wrong: this would make Linux think that it's fat12/16:
 		//if (fat16_sect_per_fat <= 0xffff)
 		//	STORE_LE(boot_blk->fat16_sect_per_fat, sect_per_fat);
-		// works:
+		// correct:
 		//STORE_LE(boot_blk->fat16_sect_per_fat, 0);
 		STORE_LE(boot_blk->sect_per_track, sect_per_track);
 		STORE_LE(boot_blk->heads, heads);
@@ -554,7 +559,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 		//STORE_LE(boot_blk->fat32_version[2], 0,0);
 		STORE_LE(boot_blk->fat32_root_cluster, 2);
 		STORE_LE(boot_blk->fat32_info_sector, info_sector_number);
-		STORE_LE(boot_blk->fat32_backup_boot, backup_boot_sector);
+		STORE_LE(boot_blk->fat32_backup_boot, backup_boot_sct);
 		//STORE_LE(boot_blk->reserved2[3], 0,0,0);
 		STORE_LE(boot_blk->vi.ext_boot_sign, 0x29);
 		STORE_LE(boot_blk->vi.volume_id32, volume_id);
@@ -570,10 +575,14 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 		STORE_LE(info->next_cluster, 2);
 		STORE_LE(info->boot_sign, BOOT_SIGN);
 
-		// 1st copy
-		xwrite(dev, buf, bytes_per_sect * backup_boot_sector);
-		// 2nd copy and possibly zero sectors
-		xwrite(dev, buf, bytes_per_sect * (reserved_sect - backup_boot_sector));
+		// 1st copy and possibly zeroed sectors
+		xwrite(dev, buf, bytes_per_sect * (backup_boot_sct > 1 ? backup_boot_sct : 2));
+		if (backup_boot_sct > 1) {
+			// 2nd copy
+			//xwrite(dev, buf, bytes_per_sect * (backup_boot_sct == reserved_sct-1 ? 1 : 2));
+			//^^^ for the case where "-b N -R N+1" is allowed
+			xwrite(dev, buf, bytes_per_sect * 2);
+		}
 	}
 
 	{ // file allocation tables
@@ -594,7 +603,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 	}
 
 	// root directory
-	// empty directory is just a set of zero bytes
+	// empty directory is just zero bytes
 	memset(buf, 0, sect_per_clust * bytes_per_sect);
 	// not "NO NAME", "NO NAME  " etc?
 	// (mkfs.fat 4.1 won't create dir entry even with explicit -n 'NO NAME',
