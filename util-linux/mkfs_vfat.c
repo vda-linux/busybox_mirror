@@ -525,7 +525,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 			"total sectors:%u, clusters:%u, sectors/cluster:%u\n"
 			"FATs:2, sectors/FAT:%u\n"
 			"volumeID:%08x, label:'%s'\n",
-// Example outout from mkfs.vfat -v -F32 -S4096 -C IMAGE $((1024*1024*1024*2))
+// Example output from mkfs.vfat -v -F32 -S4096 -C IMAGE $((1024*1024*1024*2))
 //mkfs.fat 4.2 (2021-01-31)
 //IMAGE has 255 heads and 63 sectors per track,
 //hidden sectors 0x0000;
@@ -619,10 +619,13 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 //TODO: this is slow on very large images (FAT tables can be up to 1 GByte).
 //Can try fallocate(FALLOC_FL_PUNCH_HOLE), then try fallocate(FALLOC_FL_ZERO_RANGE).
 //Can have larger write buffer.
-//If -C, we know that the file has been created and extended from zero size,
-//no need to clear FAT tables here.
 			for (j = 1; j < sect_per_fat; j++)
-				xwrite(dev, buf + bytes_per_sect, bytes_per_sect);
+				if (opts & OPT_C)
+					// If -C, file has been created and extended from zero size,
+					// no need to clear FAT tables.
+					xlseek(dev, bytes_per_sect, SEEK_CUR);
+				else
+					xwrite(dev, buf + bytes_per_sect, bytes_per_sect);
 		}
 	}
 
@@ -654,8 +657,14 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 		de->cdate = de->date;
 		de->adate = de->date;
 #endif
+		goto write_rootdir;
 	}
-	xwrite(dev, buf, sect_per_clust * bytes_per_sect);
+	// If -C, file has been created and extended from zero size,
+	// no need to clear rootdir. Else:
+	if (!(opts & OPT_C)) {
+ write_rootdir:
+		xwrite(dev, buf, sect_per_clust * bytes_per_sect);
+	}
 
 #if 0
 	if (opts & OPT_c) {
