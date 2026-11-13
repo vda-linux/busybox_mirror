@@ -28,9 +28,9 @@
 
 #include "libbb.h"
 
-#include <linux/hdreg.h> /* HDIO_GETGEO */
-#include <linux/fd.h>    /* FDGETPRM */
-#include <sys/mount.h>   /* BLKSSZGET */
+#include <linux/hdreg.h> // HDIO_GETGEO
+#include <linux/fd.h>    // FDGETPRM
+#include <sys/mount.h>   // BLKSSZGET
 #if !defined(BLKSSZGET)
 # define BLKSSZGET _IO(0x12, 104)
 #endif
@@ -47,9 +47,9 @@
 # define dbg(...) ((void)0)
 #endif
 
+#define ULL(x) ((unsigned long long)(x))
+
 // M$ says the high 4 bits of FAT32 FAT entries are reserved
-#define EOF_FAT32       0x0FFFFFF8
-#define BAD_FAT32       0x0FFFFFF7
 
 #define MAX_CLUST_CNT32 0x0FFFFFF5
 // The cluster numbers on largest possible FAT32 are 2..MAX_CLUST_CNT32+1.
@@ -60,10 +60,14 @@
 // 0xF..F6 reserved - but we consider it as valid too.
 // 0xF..F7 is "has bad sector(s)"
 // from 0xF..F8 to 0xF..FF are "no next cluster in this chain".
-
 // NB: Linux kernel uses 0x0FFFFFF6, making it treat 0x0FFFFFF7 as valid cluster# too.
-// These large cluster numbers can only occur on 127GB+ disks
+// These large cluster numbers can only occur on 129GB+ disks
 // if cluster size is 512 bytes, 1TB+ if 4k clusters.
+// Example of command creating filesystem with 0x0ffffff5 clusters:
+// mkfs.vfat -F32 -b0 -R3 -s1 -C IMAGE.bin $((130*1024*1024 - 4))
+
+#define BAD_FAT32       0x0FFFFFF7
+#define EOF_FAT32       0x0FFFFFF8
 
 #define ATTR_VOLUME     8
 
@@ -72,8 +76,6 @@
 #define SECTOR_SIZE     512
 
 #define SECTORS_PER_BLOCK	(BLOCK_SIZE / SECTOR_SIZE)
-
-#define ULL(x) ((unsigned long long)(x))
 
 // FAT32 filesystem looks like this:
 // sector -nn...-1: "hidden" sectors, all sectors before this partition
@@ -106,32 +108,31 @@ enum {
 #define TEST_BUFFER_BLOCKS      16
 
 struct msdos_dir_entry {
-	char     name[11];       /* 000 name and extension */
-	uint8_t  attr;           /* 00b attribute bits */
-	uint8_t  lcase;          /* 00c case for base and extension */
-	uint8_t  ctime_cs;       /* 00d creation time, centiseconds (0-199) */
-	uint16_t ctime;          /* 00e creation time */
-	uint16_t cdate;          /* 010 creation date */
-	uint16_t adate;          /* 012 last access date */
-	uint16_t starthi;        /* 014 high 16 bits of cluster in FAT32 */
-	uint16_t time;           /* 016 time */
-	uint16_t date;           /* 018 date */
-	uint16_t start;          /* 01a first cluster */
-	uint32_t size;           /* 01c file size in bytes */
+	char     name[11];       // 000 name and extension
+	uint8_t  attr;           // 00b attribute bits
+	uint8_t  lcase;          // 00c case for base and extension
+	uint8_t  ctime_cs;       // 00d creation time, centiseconds (0-199)
+	uint16_t ctime;          // 00e creation time
+	uint16_t cdate;          // 010 creation date
+	uint16_t adate;          // 012 last access date
+	uint16_t starthi;        // 014 high 16 bits of cluster in FAT32
+	uint16_t time;           // 016 time
+	uint16_t date;           // 018 date
+	uint16_t start;          // 01a first cluster
+	uint32_t size;           // 01c file size in bytes
 } PACKED;
 
-/* Example of boot sector's beginning:
-0000  eb 58 90 4d 53 57 49 4e  34 2e 31 00 02 08 26 00  |...MSWIN4.1...&.|
-0010  02 00 00 00 00 f8 00 00  3f 00 ff 00 3f 00 00 00  |........?...?...|
-0020  54 9b d0 00 0d 34 00 00  00 00 00 00 02 00 00 00  |T....4..........|
-0030  01 00 06 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
-0040  80 00 29 71 df 51 e0 4e  4f 20 4e 41 4d 45 20 20  |..)q.Q.NO NAME  |
-0050  20 20 46 41 54 33 32 20  20 20 33 c9 8e d1 bc f4  |  FAT32   3.....|
-*/
+// Example of boot sector's beginning:
+//0000  eb 58 90 4d 53 57 49 4e  34 2e 31 00 02 08 26 00  |...MSWIN4.1...&.|
+//0010  02 00 00 00 00 f8 00 00  3f 00 ff 00 3f 00 00 00  |........?...?...|
+//0020  54 9b d0 00 0d 34 00 00  00 00 00 00 02 00 00 00  |T....4..........|
+//0030  01 00 06 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
+//0040  80 00 29 71 df 51 e0 4e  4f 20 4e 41 4d 45 20 20  |..)q.Q.NO NAME  |
+//0050  20 20 46 41 54 33 32 20  20 20 33 c9 8e d1 bc f4  |  FAT32   3.....|
 struct msdos_boot_sector {
 	// We use strcpy to fill both, and gcc-4.4.x complains if they are separate
 	char     boot_jump_and_sys_id[3+8]; // short or near jump instruction
-	/*char   system_id[8];*/        // 003 name - can be used to special case partition manager volumes
+	//char   system_id[8];          // 003 name - can be used to special case partition manager volumes
 	uint16_t bytes_per_sect;        // 00b bytes per logical sector
 	uint8_t  sect_per_clust;        // 00d sectors/cluster
 	uint16_t reserved_sect;         // 00e reserved sectors (sector offset of 1st FAT relative to volume start)
@@ -145,7 +146,7 @@ struct msdos_boot_sector {
 	uint32_t hidden;                // 01c hidden sectors (sector offset of volume within physical disk)
 	uint32_t fat32_volume_size_sct32;//020 volume size in sectors (if volume_size_sct16 == 0)
 	uint32_t fat32_sect_per_fat;    // 024 sectors/FAT
-	uint16_t fat32_flags;           // 028 bit 8: fat mirroring, low 4: active fat
+	uint16_t fat32_flags;           // 028 bit 8: FAT mirroring, low 4: active FAT
 	uint8_t  fat32_version[2];      // 02a major, minor filesystem version (I see 0,0)
 	uint8_t  fat32_root_cluster[4]; // 02c first cluster in root directory
 	uint16_t fat32_info_sector;     // 030 filesystem info sector (usually 1)
@@ -182,36 +183,36 @@ struct bug_check {
 };
 
 static const char boot_code[] ALIGN1 =
-	"\x0e"          /* 05a:         push  cs */
-	"\x1f"          /* 05b:         pop   ds */
-	"\xbe\x77\x7c"  /*  write_msg:  mov   si, offset message_txt */
-	"\xac"          /* 05f:         lodsb */
-	"\x22\xc0"      /* 060:         and   al, al */
-	"\x74\x0b"      /* 062:         jz    key_press */
-	"\x56"          /* 064:         push  si */
-	"\xb4\x0e"      /* 065:         mov   ah, 0eh */
-	"\xbb\x07\x00"  /* 067:         mov   bx, 0007h */
-	"\xcd\x10"      /* 06a:         int   10h */
-	"\x5e"          /* 06c:         pop   si */
-	"\xeb\xf0"      /* 06d:         jmp   write_msg */
-	"\x32\xe4"      /*  key_press:  xor   ah, ah */
-	"\xcd\x16"      /* 071:         int   16h */
-	"\xcd\x19"      /* 073:         int   19h */
-	"\xeb\xfe"      /*  foo:        jmp   foo */
-	/* 077: message_txt: */
+	"\x0e"          // 05a:         push  cs
+	"\x1f"          // 05b:         pop   ds
+	"\xbe\x77\x7c"  //  write_msg:  mov   si, offset message_txt
+	"\xac"          // 05f:         lodsb
+	"\x22\xc0"      // 060:         and   al, al
+	"\x74\x0b"      // 062:         jz    key_press
+	"\x56"          // 064:         push  si
+	"\xb4\x0e"      // 065:         mov   ah, 0eh
+	"\xbb\x07\x00"  // 067:         mov   bx, 0007h
+	"\xcd\x10"      // 06a:         int   10h
+	"\x5e"          // 06c:         pop   si
+	"\xeb\xf0"      // 06d:         jmp   write_msg
+	"\x32\xe4"      //  key_press:  xor   ah, ah
+	"\xcd\x16"      // 071:         int   16h
+	"\xcd\x19"      // 073:         int   19h
+	"\xeb\xfe"      //  foo:        jmp   foo
+	// 077: message_txt:
 	"This is not a bootable disk\r\n";
 
-/* compat:
- * mkdosfs 2.11 (12 Mar 2005)
- * Usage: mkdosfs [-A] [-c] [-C] [-v] [-I] [-l bad-block-file]
- *        [-b backup-boot-sector]
- *        [-m boot-msg-file] [-n volume-name] [-i volume-id]
- *        [-s sectors-per-cluster] [-S logical-sector-size]
- *        [-f number-of-FATs]
- *        [-h hidden-sectors] [-F fat-size] [-r root-dir-entries]
- *        [-R reserved-sectors]
- *        /dev/name [blocks]
- */
+//compat:
+//mkdosfs 2.11 (12 Mar 2005)
+//Usage: mkdosfs [-A] [-c] [-C] [-v] [-I] [-l bad-block-file]
+//        [-b backup-boot-sector]
+//        [-m boot-msg-file] [-n volume-name] [-i volume-id]
+//        [-s sectors-per-cluster] [-S logical-sector-size]
+//        [-f number-of-FATs]
+//        [-h hidden-sectors] [-F fat-size] [-r root-dir-entries]
+//        [-R reserved-sectors]
+//        /dev/name [blocks]
+
 //usage:#define mkfs_vfat_trivial_usage
 //usage:       "[-Cv] [-n LABEL] [-S SECTSIZE] [-s SECTCLUST] FILE|BLOCKDEV [KBYTES]"
 // Accepted but ignored:
@@ -603,7 +604,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 		boot_blk->fat32_root_cluster[0] = 2;
 		STORE_LE(boot_blk->fat32_info_sector, info_sector_number);
 		STORE_LE(boot_blk->fat32_backup_boot, backup_boot_sct);
-		//STORE_LE(boot_blk->reserved2[3], 0,0,0);
+		//boot_blk->fat32_boot_file filled with zeros
 		boot_blk->fat32_ext_boot_sign = 0x29;
 		boot_blk->fat32_volume_id32 = volume_id; // STORE_LE not used here since the id is random anyway, swap does not add anything
 		memcpy(boot_blk->fat32_fs_type, "FAT32   ", sizeof(boot_blk->fat32_fs_type));
