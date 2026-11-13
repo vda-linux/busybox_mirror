@@ -33,4 +33,18 @@ testing "mkfs.vfat -b0 -R2 3KB image" \
 ' \
 	"" ""
 
+# Create maximal possible one-sector-per-cluster FAT32:
+# FATs should have precisely 2097152 sectors: this holds enough entries for 2097152*512/4 = 0x10000000 clusters.
+# Actual number of clusters should be 268435444 = 0x0ffffff4 (the maximum cluster# is 0x0ffffff5).
+testing "mkfs.vfat -bo -R2 -s1 136314875 kbyte (130GB) image" \
+	"rm input \\
+	&& mkfs.vfat -v -F32 -b0 -R2 -s1 -C input 136314875 2>&1 | grep -eclusters:268435444 -esectors/FAT:2097152 \\
+	&& blkid input | sed 's/\"....-....\"/\"xxxx-xxxx\"/'
+	" \
+'total sectors:272629750, clusters:268435444, sectors/cluster:1
+FATs:2, sectors/FAT:2097152
+input: UUID="xxxx-xxxx" TYPE="vfat"
+' \
+	"" ""
+
 exit $FAILCOUNT
