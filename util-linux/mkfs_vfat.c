@@ -608,10 +608,11 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 	// root directory
 	// empty directory is just zero bytes
 	memset(buf, 0, sect_per_clust * bytes_per_sect);
-	// not "NO NAME", "NO NAME  " etc?
-	// (mkfs.fat 4.1 won't create dir entry even with explicit -n 'NO NAME',
-	// but will create one with e.g. -n '', -n '  zZz')
-	if (strcmp(volume_label11, bb_NO_NAME_11) != 0) {
+	// mkfs.fat 4.1 won't create dir entry even with explicit -n 'NO NAME',
+	// but will create one with e.g. -n '', -n '  zZz'
+	// We _will_ create a 'NO NAME' volume label in root directory
+	// when explicitly requested using -n option.
+	if (arg_volume_label != bb_NO_NAME_11) {
 		// create dir entry for volume label
 		struct msdos_dir_entry *de;
 #if 0
