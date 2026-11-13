@@ -213,7 +213,7 @@ static const char boot_code[] ALIGN1 =
  *        /dev/name [blocks]
  */
 //usage:#define mkfs_vfat_trivial_usage
-//usage:       "[-Cv] [-n LABEL] [-S SECTSIZE] FILE|BLOCKDEV [KBYTES]"
+//usage:       "[-Cv] [-n LABEL] [-S SECTSIZE] [-s SECTCLUST] FILE|BLOCKDEV [KBYTES]"
 // Accepted but ignored:
 //     "[-c] [-I] [-l bad-block-file] "
 //     "[-m boot-msg-file] [-i volume-id] "
@@ -227,6 +227,7 @@ static const char boot_code[] ALIGN1 =
 //usage:     "\n	-b BACKUP_SECT"
 //usage:     "\n	-R FAT_START	FAT start sector"
 //usage:     "\n	-S SECTOR_SIZE"
+//usage:     "\n	-s SECTORS_PER_CLUSTER"
 // ^^^ even though in FAT lingo it's "reserved sectors", in ordinary language
 // it's the sector where FAT table starts.
 ////usage:   "\n	-I	Allow to use entire disk device (e.g. /dev/hda)"
@@ -239,6 +240,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 	mode_t st_mode;
 	const char *arg_volume_label = bb_NO_NAME_11; //default
 	const char *arg_sector_size;
+	const char *arg_sect_per_clust;
 	char volume_label11[12];
 	char *buf;
 	uoff_t volume_size_bytes;
@@ -271,17 +273,20 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 		//OPT_n = 1 << 10, // volume label
 		//OPT_r = 1 << 11, // [IGNORED] root directory entries
 		//OPT_R = 1 << 12, // number of reserved sectors
-		//OPT_s = 1 << 13, // [IGNORED] sectors per cluster
-		OPT_S = 1 << 14, // sector size
+		OPT_s = 1 << 13,   // sectors per cluster
+		OPT_S = 1 << 14,   // sector size
 		OPT_v = 1 << 15,   // verbose
 	};
 
 	opts = getopt32(argv, "^"
 		"b:+cCf:F:h:Ii:l:m:n:r:R:+s:S:v"
 		"\0" "-1", //:b+:f+:F+:h+:r+:R+:s+:S+:vv:c--l:l--c
-		/*b*/&backup_boot_sct, /*f*/NULL, /*F*/NULL, /*h*/NULL, /*i*/NULL,
-		/*l*/NULL, /*m*/NULL, /*n*/&arg_volume_label,
-		/*r*/NULL, /*R*/&reserved_sct, /*s*/NULL, /*S*/&arg_sector_size);
+		/*b*/&backup_boot_sct,
+		/*f*/NULL, /*F*/NULL, /*h*/NULL, /*i*/NULL, /*l*/NULL, /*m*/NULL,
+		/*n*/&arg_volume_label, /*r*/NULL,
+		/*R*/&reserved_sct,
+		/*s*/&arg_sect_per_clust, /*S*/&arg_sector_size
+	);
 	argv += optind;
 
 	if (reserved_sct < 2 || reserved_sct > 0xffff /* won't fit in header field */)
@@ -458,12 +463,21 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 	// 1 boot, 1 fsinfo, 2 FAT sectors, 2 data sectors
 	// and Linux was tested to successfully mount it.
 	if ((off_t)(volume_size_sect - reserved_sct) < 4)
+ too_small:
 		// common message
 		bb_error_msg_and_die("image is too small: %lld bytes",
 			ULL(volume_size_sect) * bytes_per_sect);
 
 // From now on we know it fits 32 bits
 #define volume_size_sect ((uint32_t)volume_size_sect)
+
+	if (opts & OPT_s) {
+		// -s: upstream accepts hex too, accepts any power-of-2 from 1 to 0x80
+		unsigned n = bb_strtou(arg_sect_per_clust, NULL, 0);
+		if (n == 0 || n > 0x80 || (n & (n-1)))
+			bb_error_msg_and_die("bad -s '%s'", arg_sect_per_clust);
+		sect_per_clust = n; // uint8_t
+	}
 
 	// Calculate number of clusters, sectors/cluster, sectors/FAT
 	// (an initial guess for sect_per_clust should already be set)
@@ -473,6 +487,9 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 		while (1) {
 			int spf_adj;
 			total_clust = (volume_size_sect - reserved_sct - NUM_FATS * sect_per_fat) / sect_per_clust;
+			// "mkfs.vfat -v -F32 -b0 -R2 -s4 -C IMAGE_ZERO_CLUSTERS 3" has total_clust = 0
+			if (total_clust == 0) // Linux would not mount such FS
+				goto too_small;
 			// total_clust may be > MAX_CLUST_CNT32 here, but it may be
 			// because sect_per_fat is underestimated,
 			// and with increased sect_per_fat it still may become
@@ -505,13 +522,16 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 			// adjust sect_per_fat, go back and recalc total_clust
 			// (note: just "sect_per_fat += spf_adj" isn't ok)
 			sect_per_fat += ((unsigned)spf_adj / 2) | 1;
-		}
+		} // while (1)
  next:
+		if (opts & OPT_s) // if -s SECTORS was given explicitly, do not auto-adjust
+// upstream says "Not enough or too many clusters for filesystem - try less or more sectors per cluster"
+			bb_error_msg_and_die("too small -s %s", arg_sect_per_clust);
 		sect_per_clust *= 2;
 		if (sect_per_clust == 0) // uint8_t overflowed: 128*2 = 0
 			bb_simple_error_msg_and_die("can't make FAT32 with >128 sectors/cluster");
 		sect_per_fat = (sect_per_fat / 2) | 1;
-	}
+	} // while (1)
  found_total_clust:
 
 	//
