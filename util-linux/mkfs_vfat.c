@@ -73,28 +73,29 @@
 
 #define SECTORS_PER_BLOCK	(BLOCK_SIZE / SECTOR_SIZE)
 
-/* FAT32 filesystem looks like this:
- * sector -nn...-1: "hidden" sectors, all sectors before this partition
- * (-h hidden-sectors sets it. Useful only for boot loaders,
- *  they need to know _disk_ offset in order to be able to correctly
- *  address sectors relative to start of disk)
- * sector 0: boot sector
- * sector 1: info sector
- * sector 2: set aside for boot code which didn't fit into sector 0
- * ...(zero-filled sectors)...
- * sector B: backup copy of sector 0 [B set by -b backup-boot-sector]
- * sector B+1: backup copy of sector 1
- * sector B+2: backup copy of sector 2
- * ...(zero-filled sectors)...
- * sector R: FAT#1 [R set by -R reserved-sectors]
- * ...(FAT#1)...
- * sector R+fat_size: FAT#2
- * ...(FAT#2)...
- * sector R+fat_size*2: cluster #2
- * ...(cluster #2)...
- * sector R+fat_size*2+clust_size: cluster #3
- * ...(the rest is filled by clusters till the end)...
- */
+#define ULL(x) ((unsigned long long)(x))
+
+// FAT32 filesystem looks like this:
+// sector -nn...-1: "hidden" sectors, all sectors before this partition
+// (-h hidden-sectors sets it. Useful only for boot loaders,
+//  they need to know _disk_ offset in order to be able to correctly
+//  address sectors relative to start of disk)
+// sector 0: boot sector
+// sector 1: info sector
+// sector 2: set aside for boot code which didn't fit into sector 0
+// ...(zero-filled sectors)...
+// sector B: backup copy of sector 0 [B set by -b backup-boot-sector]
+// sector B+1: backup copy of sector 1
+// sector B+2: backup copy of sector 2
+// ...(zero-filled sectors)...
+// sector R: FAT#1 [R set by -R reserved-sectors]
+// ...(FAT#1)...
+// sector R+fat_size: FAT#2
+// ...(FAT#2)...
+// sector R+fat_size*2: cluster #2
+// ...(cluster #2)...
+// sector R+fat_size*2+clust_size: cluster #3
+// ...(the rest is filled by clusters till the end)...
 
 enum {
 // Perhaps this should remain constant
@@ -221,13 +222,13 @@ static const char boot_code[] ALIGN1 =
 //
 //usage:#define mkfs_vfat_full_usage "\n\n"
 //usage:       "Make FAT32 filesystem\n"
-/* //usage:  "\n	-c	Check BLOCKDEV for bad blocks" */
+////usage:   "\n	-c	Check BLOCKDEV for bad blocks"
 //usage:     "\n	-C	Create new FILE"
 //usage:     "\n	-b BACKUP_SECT"
 //usage:     "\n	-R FAT_START	FAT start sector"
 // ^^^ even though in FAT lingo it's "reserved sectors", in ordinary language
 // it's the sector where FAT table starts.
-/* //usage:  "\n	-I	Allow to use entire disk device (e.g. /dev/hda)" */
+////usage:   "\n	-I	Allow to use entire disk device (e.g. /dev/hda)"
 //usage:     "\n	-n LBL	Volume label"
 //usage:     "\n	-v	Verbose"
 
@@ -342,7 +343,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 			/*minsize:*/ 6 * bytes_per_sect | /*extend:*/ 1
 		);
 	volume_size_sect = volume_size_bytes / bytes_per_sect;
-	dbg("volume_size_sect:%llu", (unsigned long long)volume_size_sect);
+	dbg("volume_size_sect:%llu", ULL(volume_size_sect));
 
 	//
 	// Find out or guess media parameters
@@ -354,7 +355,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 	{
 		struct hd_geometry geometry;
 		// size (in sectors), sect (per track), head
-		struct floppy_struct param;
+		struct floppy_struct floppy;
 
 		// N.B. whether to use HDIO_GETGEO or HDIO_REQ?
 		if (ioctl(dev, HDIO_GETGEO, &geometry) == 0
@@ -364,7 +365,6 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 			// hard drive
 			sect_per_track = geometry.sectors;
 			heads = geometry.heads;
-
  set_cluster_size:
 			// For FAT32, try to do the same as M$'s format command
 			// (see http://www.win.tue.nl/~aeb/linux/fs/fat/fatgen103.pdf p. 20):
@@ -394,13 +394,13 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 			}
 		} else {
 			// floppy, loop, or regular file
-			int not_floppy = ioctl(dev, FDGETPRM, &param);
+			int not_floppy = ioctl(dev, FDGETPRM, &floppy);
 			if (not_floppy == 0) {
 				// floppy disk
-				sect_per_track = param.sect;
-				heads = param.head;
-				volume_size_sect = param.size;
-				volume_size_bytes = param.size * SECTOR_SIZE;
+				sect_per_track = floppy.sect;
+				heads = floppy.head;
+				volume_size_sect = floppy.size;
+				volume_size_bytes = floppy.size * SECTOR_SIZE;
 			}
 			// setup the media descriptor byte
 			switch (volume_size_sect) {
@@ -437,8 +437,8 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 		// requires explicit -S SECTSIZE.
 		// Example: mkfs.vfat -F32 -C FILE2TB $((1024*1024*1024*2))
 		// should say that one sector is unused:
-		bb_error_msg("target too large, unused sectors:%llu",
-			(unsigned long long)(volume_size_sect - 0xFFFFFFFFu));
+		bb_error_msg("target too large, unused sectors: %llu",
+			ULL(volume_size_sect - 0xFFFFFFFFu));
 		volume_size_sect = 0xFFFFFFFFu;
 	}
 
@@ -448,7 +448,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 	if ((off_t)(volume_size_sect - reserved_sct) < 4)
 		// common message
 		bb_error_msg_and_die("image is too small: %lld bytes",
-			(unsigned long long)volume_size_sect * bytes_per_sect);
+			ULL(volume_size_sect) * bytes_per_sect);
 
 // From now on we know it fits 32 bits
 #define volume_size_sect ((uint32_t)volume_size_sect)
@@ -586,7 +586,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 	}
 
 	{ // file allocation tables
-		unsigned i,j;
+		unsigned i, j;
 
 		memset(buf, 0, bytes_per_sect * 2);
 		// initial FAT entries
