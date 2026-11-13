@@ -213,12 +213,12 @@ static const char boot_code[] ALIGN1 =
  *        /dev/name [blocks]
  */
 //usage:#define mkfs_vfat_trivial_usage
-//usage:       "[-Cv] [-n LABEL] FILE|BLOCKDEV [KBYTES]"
+//usage:       "[-Cv] [-n LABEL] [-S SECTSIZE] FILE|BLOCKDEV [KBYTES]"
 // Accepted but ignored:
-//     "[-c] [-I] [-l bad-block-file] [-b backup-boot-sector] "
+//     "[-c] [-I] [-l bad-block-file] "
 //     "[-m boot-msg-file] [-i volume-id] "
-//     "[-s sectors-per-cluster] [-S logical-sector-size] [-f number-of-FATs] "
-//     "[-h hidden-sectors] [-F fat-size] [-r root-dir-entries] [-R reserved-sectors] "
+//     "[-s sectors-per-cluster] [-f number-of-FATs] "
+//     "[-h hidden-sectors] [-F fat-size] [-r root-dir-entries]"
 //
 //usage:#define mkfs_vfat_full_usage "\n\n"
 //usage:       "Make FAT32 filesystem\n"
@@ -226,6 +226,7 @@ static const char boot_code[] ALIGN1 =
 //usage:     "\n	-C	Create new FILE"
 //usage:     "\n	-b BACKUP_SECT"
 //usage:     "\n	-R FAT_START	FAT start sector"
+//usage:     "\n	-S SECTOR_SIZE"
 // ^^^ even though in FAT lingo it's "reserved sectors", in ordinary language
 // it's the sector where FAT table starts.
 ////usage:   "\n	-I	Allow to use entire disk device (e.g. /dev/hda)"
@@ -237,6 +238,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 {
 	mode_t st_mode;
 	const char *arg_volume_label = bb_NO_NAME_11; //default
+	const char *arg_sector_size;
 	char volume_label11[12];
 	char *buf;
 	uoff_t volume_size_bytes;
@@ -270,10 +272,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 		//OPT_r = 1 << 11, // [IGNORED] root directory entries
 		//OPT_R = 1 << 12, // number of reserved sectors
 		//OPT_s = 1 << 13, // [IGNORED] sectors per cluster
-		//OPT_S = 1 << 14, // [IGNORED] sector size
-		// -S: upstream accepts hex too, accepts any power-of-2 from 512 to 0x8000, but sectors >4k
-		// emit "Warning: sector size N > 4096 is non-standard, filesystem may not be usable"
-		// and it's correct: Linux kernel does not support it
+		OPT_S = 1 << 14, // sector size
 		OPT_v = 1 << 15,   // verbose
 	};
 
@@ -282,7 +281,7 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 		"\0" "-1", //:b+:f+:F+:h+:r+:R+:s+:S+:vv:c--l:l--c
 		/*b*/&backup_boot_sct, /*f*/NULL, /*F*/NULL, /*h*/NULL, /*i*/NULL,
 		/*l*/NULL, /*m*/NULL, /*n*/&arg_volume_label,
-		/*r*/NULL, /*R*/&reserved_sct, /*s*/NULL, /*S*/NULL);
+		/*r*/NULL, /*R*/&reserved_sct, /*s*/NULL, /*S*/&arg_sector_size);
 	argv += optind;
 
 	if (reserved_sct < 2 || reserved_sct > 0xffff /* won't fit in header field */)
@@ -339,6 +338,19 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 			bb_error_msg("for this device sector size is %u", min_bytes_per_sect);
 		}
 	}
+
+	if (opts & OPT_S) {
+		// -S: upstream accepts hex too, accepts any power-of-2 from 512 to 0x8000, but sectors >4k
+		// emit "Warning: sector size N > 4096 is non-standard, filesystem may not be usable"
+		// and it's correct: Linux kernel does not support >4k
+		bytes_per_sect = bb_strtou(arg_sector_size, NULL, 0);
+		if (bytes_per_sect < 0x200 || bytes_per_sect > 0x8000
+		 || (bytes_per_sect & (bytes_per_sect-1))
+		) {
+			bb_error_msg_and_die("bad -S '%s'", arg_sector_size);
+		}
+	}
+
 	volume_size_bytes = get_volume_size_in_bytes(dev, argv[1], 1024,
 			/*minsize:*/ 6 * bytes_per_sect | /*extend:*/ 1
 		);
@@ -513,6 +525,17 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 			"total sectors:%u, clusters:%u, sectors/cluster:%u\n"
 			"FATs:2, sectors/FAT:%u\n"
 			"volumeID:%08x, label:'%s'\n",
+// Example outout from mkfs.vfat -v -F32 -S4096 -C IMAGE $((1024*1024*1024*2))
+//mkfs.fat 4.2 (2021-01-31)
+//IMAGE has 255 heads and 63 sectors per track,
+//hidden sectors 0x0000;
+//logical sector size is 4096,
+//using 0xf8 media descriptor, with 536870880 sectors;
+//drive number 0x80;
+//filesystem has 2 32-bit FATs and 64 sectors per cluster.
+//FAT size is 8192 sectors, and provides 8388350 clusters.
+//There are 64 reserved sectors.
+//Volume ID is bd24d78e, no volume label.
 			argv[0],
 			heads, sect_per_track, bytes_per_sect,
 			(unsigned)media_byte,
@@ -575,14 +598,10 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 		info->next_cluster[0] = 2;
 		info->boot_sign = SWAP_LE16(BOOT_SIGN);
 
-		// 1st copy and possibly zeroed sectors
-		xwrite(dev, buf, bytes_per_sect * (backup_boot_sct > 1 ? backup_boot_sct : 2));
-		if (backup_boot_sct > 1) {
-			// 2nd copy
-			//xwrite(dev, buf, bytes_per_sect * (backup_boot_sct == reserved_sct-1 ? 1 : 2));
-			//^^^ for the case where "-b N -R N+1" is allowed
-			xwrite(dev, buf, bytes_per_sect * 2);
-		}
+		if (backup_boot_sct > 1) // if backup should exist, create it
+			memcpy(buf + bytes_per_sect * backup_boot_sct, buf, bytes_per_sect * 2);
+		// fill entire area up to start of FATs
+		xwrite(dev, buf, bytes_per_sect * reserved_sct);
 	}
 
 	{ // file allocation tables
@@ -600,6 +619,8 @@ int mkfs_vfat_main(int argc UNUSED_PARAM, char **argv)
 //TODO: this is slow on very large images (FAT tables can be up to 1 GByte).
 //Can try fallocate(FALLOC_FL_PUNCH_HOLE), then try fallocate(FALLOC_FL_ZERO_RANGE).
 //Can have larger write buffer.
+//If -C, we know that the file has been created and extended from zero size,
+//no need to clear FAT tables here.
 			for (j = 1; j < sect_per_fat; j++)
 				xwrite(dev, buf + bytes_per_sect, bytes_per_sect);
 		}
