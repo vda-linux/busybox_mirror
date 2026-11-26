@@ -179,6 +179,45 @@ cpio.testdir/dont_write does not exist
 " "" ""
 SKIP=
 
+optional FEATURE_PATH_TRAVERSAL_PROTECTION FEATURE_CPIO_O
+rm -rf cpio.testdir
+mkdir -p cpio.testdir/prepare/inner cpio.testdir/extract
+echo "extracted payload" > cpio.testdir/prepare/payload
+ln cpio.testdir/prepare/payload cpio.testdir/prepare/inner/alias
+# BusyBox emits hardlinks in reverse input order, with data in the last entry.
+testing "cpio sanitizes hardlink targets without an outside file" "\
+(cd cpio.testdir/prepare/inner && $ECHO -e '../payload\nalias' | cpio -o -H newc) > cpio.testdir/hardlinks.cpio
+(cd cpio.testdir/extract && cpio -i < ../hardlinks.cpio 2>/dev/null)
+echo \$?
+cat cpio.testdir/extract/alias
+test cpio.testdir/extract/alias -ef cpio.testdir/extract/payload && echo linked
+test ! -e cpio.testdir/payload && echo no-outside" \
+"\
+0
+extracted payload
+linked
+no-outside
+" "" ""
+SKIP=
+
+optional FEATURE_PATH_TRAVERSAL_PROTECTION FEATURE_CPIO_O
+rm -rf cpio.testdir/extract
+mkdir cpio.testdir/extract
+echo "outside payload" > cpio.testdir/payload
+testing "cpio sanitizes hardlink targets with an outside file" "\
+(cd cpio.testdir/extract && cpio -i < ../hardlinks.cpio 2>/dev/null)
+echo \$?
+cat cpio.testdir/extract/alias
+test cpio.testdir/extract/alias -ef cpio.testdir/extract/payload && echo linked
+cat cpio.testdir/payload" \
+"\
+0
+extracted payload
+linked
+outside payload
+" "" ""
+SKIP=
+
 # Clean up
 rm -rf cpio.testdir cpio.testdir2 2>/dev/null
 
